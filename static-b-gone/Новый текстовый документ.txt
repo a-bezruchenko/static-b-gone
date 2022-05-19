@@ -1,0 +1,8 @@
+        <!-- Added to fix problem with roslyn program build 
+        <dependentAssembly>
+            <assemblyIdentity name="Microsoft.ExtendedReflection" publicKeyToken="b03f5f7f11d50a3a" culture="neutral"/>
+            <bindingRedirect oldVersion="14.0.0.0-16.0.0.0" newVersion="16.0.0.0"/>
+            <codeBase version="16.0.0.0" href="Extensions\Microsoft\Pex\Microsoft.ExtendedReflection.dll"/>
+        </dependentAssembly>
+          Microsoft.Build.Framework, Version=15.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+          -->
