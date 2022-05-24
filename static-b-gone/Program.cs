@@ -15,8 +15,8 @@ namespace static_b_gone
             string path = parsedArgs?.GetValueOrDefault("path") ?? configArgs?.GetValueOrDefault("path") ?? throw new ArgumentNullException("Need to specify path to project file");
             string classToReplace = parsedArgs?.GetValueOrDefault("class") ?? configArgs?.GetValueOrDefault("class") ?? throw new ArgumentNullException("Need to specify class to replace");
 
-            var staticRemover = new StaticRemover();
-            await staticRemover.RemoveStatic(path, classToReplace);
+            var staticRemover = new StaticRemover() { ClassToReplace = classToReplace, PathToProject = path };
+            await staticRemover.RemoveStatic();
         }
     }
 }
