@@ -6,6 +6,8 @@ using Microsoft.CodeAnalysis.Editing;
 using Microsoft.CodeAnalysis.MSBuild;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,14 +18,17 @@ namespace static_b_gone
     {
         public string PathToProject { get; set; }
         public string ClassToReplace { get; set; }
-        private string InterfaceNameToReplaceWith => GetInterfaceNameForClassReplacement(ClassToReplace);
-        private string FieldNameToReplaceWith => GetFieldNameForClassReplacement(ClassToReplace);
+        private string InterfaceNameToReplaceWith => "I" + ClassToReplace;
+        private string FieldNameToReplaceWith => "_" + Char.ToLower(ClassToReplace[0]) + ClassToReplace.Substring(1);
 
         public async Task RemoveStatic()
         {
-            //var visualStudioInstances = MSBuildLocator.QueryVisualStudioInstances().ToArray();
-            //var instance = visualStudioInstances[0];
+            /*var visualStudioInstances = MSBuildLocator.QueryVisualStudioInstances().ToArray();
+            var instance = visualStudioInstances.Length == 1 ? visualStudioInstances[0] : SelectVisualStudioInstance(visualStudioInstances);
+            MSBuildLocator.RegisterInstance(instance);*/
             MSBuildLocator.RegisterDefaults();
+
+            Stopwatch sw = Stopwatch.StartNew();
 
             using (var workspace = MSBuildWorkspace.Create())
             {
@@ -49,6 +54,10 @@ namespace static_b_gone
 
                 workspace.TryApplyChanges(solution);
             }
+
+            sw.Stop();
+
+            Console.WriteLine("Finished in {0} seconds", sw.ElapsedMilliseconds / 1000);
         }        
 
         private async Task<Document> RemoveStaticFromFile(MSBuildWorkspace workspace, Document file)
@@ -59,7 +68,32 @@ namespace static_b_gone
             var occurencesToReplace = root.DescendantNodes().OfType<IdentifierNameSyntax>().Where(x => x.ToString() == ClassToReplace).ToList();
             if (occurencesToReplace.Count > 0)
             {
+                bool hasStatic = false;
+                bool hasNonStatic = false;
+                foreach (var node in occurencesToReplace)
+                {
+                    if (IsNodeInStaticFunc(node))
+                        hasStatic = true;
+                    else
+                        hasNonStatic = true;
+                }
+
                 var editor = await DocumentEditor.CreateAsync(file);
+
+                if (hasStatic)
+                {
+                    var usingDiNode = GetUsingDiNode();
+                    var lastUsingNode = GetLastUsingNode(root);
+                    if (lastUsingNode != null)
+                        editor.InsertAfter(lastUsingNode, usingDiNode);
+                }
+
+                if (hasNonStatic)
+                {
+
+                }
+
+                
                 foreach (var node in occurencesToReplace)
                 {
                     // replace it with call to ServiceLocator
@@ -76,7 +110,6 @@ namespace static_b_gone
                     }
                     else
                     {
-                        // check if we have field for this class, create if needed
                         // replace it with call to field
                     }
                     */
@@ -88,16 +121,40 @@ namespace static_b_gone
             return file;
         }
 
-        private void PrintTree(SyntaxNodeOrToken root, int depth = 0)
+        private SyntaxNode ReadNodeFromFile(string filename)
         {
-            string indent = new string(' ', depth * 4);
-            Console.WriteLine("{0}{1} {2}", indent, root.Kind().ToString(), root.ToString());
-            if (root.IsNode)
+            using (FileStream fs = File.OpenRead(filename))
             {
-                foreach (var child in root.ChildNodesAndTokens())
+                return CSharpSyntaxNode.DeserializeFrom(fs);
+            }
+        }
+
+        private SyntaxNode GetLastUsingNode(SyntaxNode root)
+        {
+            return root.DescendantNodes().OfType<UsingDirectiveSyntax>().LastOrDefault();
+        }
+
+        private VisualStudioInstance SelectVisualStudioInstance(VisualStudioInstance[] visualStudioInstances)
+        {
+            Console.WriteLine("Multiple installs of MSBuild detected please select one:");
+            for (int i = 0; i < visualStudioInstances.Length; i++)
+            {
+                Console.WriteLine($"Instance {i + 1}");
+                Console.WriteLine($"    Name: {visualStudioInstances[i].Name}");
+                Console.WriteLine($"    Version: {visualStudioInstances[i].Version}");
+                Console.WriteLine($"    MSBuild Path: {visualStudioInstances[i].MSBuildPath}");
+            }
+
+            while (true)
+            {
+                var userResponse = Console.ReadLine();
+                if (int.TryParse(userResponse, out int instanceNumber) &&
+                    instanceNumber > 0 &&
+                    instanceNumber <= visualStudioInstances.Length)
                 {
-                    PrintTree(child, depth + 1);
+                    return visualStudioInstances[instanceNumber - 1];
                 }
+                Console.WriteLine("Input not accepted, try again.");
             }
         }
 
@@ -107,39 +164,22 @@ namespace static_b_gone
         {
             if (_serviceLocatorCallNode == null)
             {
-                /*
-                InvocationExpression ServiceLocator.Instance.Resolve<IClass>()
-                    SimpleMemberAccessExpression ServiceLocator.Instance.Resolve<IClass>
-                        SimpleMemberAccessExpression ServiceLocator.Instance
-                            IdentifierName ServiceLocator
-                            IdentifierName Instance
-                        GenericName Resolve<IClass>
-                            TypeArgumentList <IClass>
-                                IdentifierName IClass
-                    ArgumentList ()
-                */
-
-                _serviceLocatorCallNode = SyntaxFactory.InvocationExpression(
-                    SyntaxFactory.MemberAccessExpression(
-                        SyntaxKind.SimpleMemberAccessExpression,
-                        SyntaxFactory.MemberAccessExpression(
-                            SyntaxKind.SimpleMemberAccessExpression,
-                            SyntaxFactory.IdentifierName("ServiceLocator"),
-                            SyntaxFactory.IdentifierName("Instance")
-                            ),
-                        SyntaxFactory.GenericName(
-                            SyntaxFactory.Identifier("Resolve"),
-                            SyntaxFactory.TypeArgumentList(
-                                new SeparatedSyntaxList<TypeSyntax>().Add(
-                                    SyntaxFactory.IdentifierName(className))
-                                )
-                            )
-                        ),
-                    SyntaxFactory.ArgumentList()
-                    );
+                _serviceLocatorCallNode = ReadNodeFromFile("service_locator_call.bin");
             }
 
             return _serviceLocatorCallNode;
+        }
+
+        SyntaxNode _usingDiNode;
+
+        private SyntaxNode GetUsingDiNode()
+        {
+            if (_usingDiNode == null)
+            {
+                _usingDiNode = ReadNodeFromFile("using_di.bin");
+            }
+
+            return _usingDiNode;
         }
 
         // check if node belongs to static method, field or member
@@ -173,16 +213,5 @@ namespace static_b_gone
             propertyNode = (MethodDeclarationSyntax)node;
             return propertyNode.Modifiers.Any(SyntaxKind.StaticKeyword);
         }
-
-        private string GetFieldNameForClassReplacement(string targetClassName)
-        {
-            return "_" + Char.ToLower(targetClassName[0]) + targetClassName.Substring(1);
-        }
-
-        private string GetInterfaceNameForClassReplacement(string targetClassName)
-        {
-            return "I" + targetClassName;
-        }
-
     }
 }
